@@ -1,0 +1,193 @@
+(*
+================================================================================
+PROJECT:   Filling Tank (Timers) - Factory IO
+PROGRAM:   PLC_PRG
+AUTHOR:    Emmanuel E. Ajaegbu
+DATE:      May 2026
+VERSION:   1.0 - Final Cleaned Version
+DESCRIPTION:
+   Timer-based tank filling and discharging system using momentary push buttons.
+   Includes mutual interlock, real-time countdown display, and fail-safe design.
+   Fully tested and accepted in Factory IO v2.5.8.
+================================================================================
+*)
+
+PROGRAM PLC_PRG
+
+VAR
+    // =========================================================================
+    // INPUTS - Connected to Factory IO push buttons
+    // =========================================================================
+    Fill_PB        : BOOL;      // Momentary Fill button
+    Discharge_PB   : BOOL;      // Momentary Discharge button
+
+    // =========================================================================
+    // OUTPUTS - Connected to Factory IO actuators and panel
+    // =========================================================================
+    Fill_Valve     : BOOL;      // Opens inlet valve
+    Discharge_Valve: BOOL;      // Opens outlet valve
+    Filling        : BOOL;      // Status for HMI / panel light
+    Discharging    : BOOL;      // Status for HMI / panel light
+    Timer_Display  : WORD;      // Numeric display on control panel (seconds)
+
+    // =========================================================================
+    // INTERNAL MEMORY / LATCHES
+    // =========================================================================
+    Fill_Latch      : BOOL;     // Keeps fill cycle running after button release
+    Discharge_Latch : BOOL;     // Keeps discharge cycle running after button release
+
+    // =========================================================================
+    // TIMERS
+    // =========================================================================
+    Fill_Timer      : TON;      // On-delay timer for filling
+    Discharge_Timer : TON;      // On-delay timer for discharging
+
+    // =========================================================================
+    // TIME CALCULATIONS (for countdown display)
+    // =========================================================================
+    Fill_Remaining      : TIME;      // PT - ET for fill cycle
+    Discharge_Remaining : TIME;      // PT - ET for discharge cycle
+
+    // =========================================================================
+    // CONVERTED VALUES (for panel display)
+    // =========================================================================
+    Fill_Remain_INT      : INT;      // Remaining seconds as integer
+    Discharge_Remain_INT : INT;      // Remaining seconds as integer
+
+END_VAR
+
+// =============================================================================
+// NETWORK 1: Set Fill Latch (with interlock)
+// =============================================================================
+GVL.Fill_PB          GVL.Discharge_Latch      GVL.Fill_Latch
+───────| |───────────────|/|──────────────────────(S)
+
+// =============================================================================
+// NETWORK 2: Set Discharge Latch (with interlock)
+// =============================================================================
+GVL.Discharge_PB     GVL.Fill_Latch           GVL.Discharge_Latch
+───────| |───────────────|/|──────────────────────(S)
+
+// =============================================================================
+// NETWORK 3: Fill Timer (43 seconds)
+// =============================================================================
+GVL.Fill_Latch
+───────| |───────[TON]
+               IN      PT     T#43S
+               GVL.Fill_Timer        → GVL.Fill_Timer.ET
+
+// =============================================================================
+// NETWORK 4: Discharge Timer (55 seconds)
+// =============================================================================
+GVL.Discharge_Latch
+───────| |───────[TON]
+               IN      PT     T#55S
+               GVL.Discharge_Timer   → GVL.Discharge_Timer.ET
+
+// =============================================================================
+// NETWORK 5: Reset Fill Latch when timer completes
+// =============================================================================
+GVL.Fill_Timer.Q
+───────| |──────────────────────────────(R)  GVL.Fill_Latch
+
+// =============================================================================
+// NETWORK 6: Reset Discharge Latch when timer completes
+// =============================================================================
+GVL.Discharge_Timer.Q
+───────| |──────────────────────────────(R)  GVL.Discharge_Latch
+
+// =============================================================================
+// NETWORK 7: Filling Status Output
+// =============================================================================
+GVL.Fill_Latch
+───────| |──────────────────────────────( )  GVL.Filling
+
+// =============================================================================
+// NETWORK 8: Fill Valve Control
+// =============================================================================
+GVL.Fill_Latch
+───────| |──────────────────────────────( )  GVL.Fill_Valve
+
+// =============================================================================
+// NETWORK 9: Discharging Status Output
+// =============================================================================
+GVL.Discharge_Latch
+───────| |──────────────────────────────( )  GVL.Discharging
+
+// =============================================================================
+// NETWORK 10: Discharge Valve Control
+// =============================================================================
+GVL.Discharge_Latch
+───────| |──────────────────────────────( )  GVL.Discharge_Valve
+
+// =============================================================================
+// NETWORK 11: Calculate Fill Remaining Time (PT - ET)
+// =============================================================================
+GVL.Fill_Latch
+───────| |───────[SUB]
+               EN     ENO
+               GVL.Fill_Timer.PT     GVL.Fill_Remaining
+               GVL.Fill_Timer.ET
+
+// =============================================================================
+// NETWORK 12: Convert Fill Remaining Time to INT
+// =============================================================================
+GVL.Fill_Remaining
+───────[TO_INT]────────────────────────>  GVL.Fill_Remain_INT
+
+// =============================================================================
+// NETWORK 13: Convert milliseconds to seconds (÷ 1000)
+// =============================================================================
+GVL.Fill_Latch               GVL.Fill_Remain_INT
+───────| |───────[DIV]
+               EN     ENO
+               1000                  →  GVL.Fill_Remain_INT
+
+// =============================================================================
+// NETWORK 14: Send Fill Countdown to Panel Display
+// =============================================================================
+GVL.Fill_Latch               GVL.Fill_Remain_INT
+───────| |───────[MOVE]
+               EN     ENO
+               →  GVL.Timer_Display
+
+// =============================================================================
+// NETWORK 15: Calculate Discharge Remaining Time (PT - ET)
+// =============================================================================
+GVL.Discharge_Latch
+───────| |───────[SUB]
+               EN     ENO
+               GVL.Discharge_Timer.PT   GVL.Discharge_Remaining
+               GVL.Discharge_Timer.ET
+
+// =============================================================================
+// NETWORK 16: Convert Discharge Remaining Time to INT
+// =============================================================================
+GVL.Discharge_Remaining
+───────[TO_INT]────────────────────────>  GVL.Discharge_Remain_INT
+
+// =============================================================================
+// NETWORK 17: Convert milliseconds to seconds (÷ 1000)
+// =============================================================================
+GVL.Discharge_Latch               GVL.Discharge_Remain_INT
+───────| |───────[DIV]
+               EN     ENO
+               1000                  →  GVL.Discharge_Remain_INT
+
+// =============================================================================
+// NETWORK 18: Send Discharge Countdown to Panel Display
+// =============================================================================
+GVL.Discharge_Latch               GVL.Discharge_Remain_INT
+───────| |───────[MOVE]
+               EN     ENO
+               →  GVL.Timer_Display
+
+// =============================================================================
+// NETWORK 19: Reset Display to 0 when both cycles are idle
+// =============================================================================
+GVL.Fill_Latch     GVL.Discharge_Latch
+───────|/|───────────────|/|───────[MOVE]
+                                    EN     ENO
+                                    0      →  GVL.Timer_Display
+
+END_PROGRAM
