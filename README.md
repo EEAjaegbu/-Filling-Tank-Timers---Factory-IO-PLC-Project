@@ -1,6 +1,7 @@
 # Filling Tank (Timers) - Factory IO PLC Project
 
 **A clean, professional timer-based tank filling and discharging system** built in **Factory IO** with **IEC 61131-3 Ladder Logic**.
+<img width="959" height="506" alt="image" src="https://github.com/user-attachments/assets/f7400b6a-0363-4718-a078-356b8664ea6e" />
 
 
 ## 📋 Project Overview
